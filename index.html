@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Meine Feeds</title>
+<link rel="manifest" href="manifest.json">
+<style>
+body { font-family: sans-serif; margin:0; padding:0; background:#f8f8f8;}
+header { padding:15px; background:#007AFF; color:white; text-align:center; font-size:1.2em;}
+#feedForm { display:flex; margin:10px; }
+#feedForm input { flex:1; padding:8px; border-radius:4px; border:1px solid #ccc;}
+#feedForm button { padding:8px 12px; margin-left:5px; border:none; background:#007AFF; color:white; border-radius:4px; cursor:pointer;}
+.feed-item { border-bottom:1px solid #ccc; padding:10px; background:white; margin-bottom:5px; border-radius:4px;}
+.feed-item img, .feed-item video { max-width:100%; margin-top:5px; border-radius:4px;}
+button.openLink { margin-top:5px; background:#007AFF; color:white; border:none; padding:5px 10px; cursor:pointer; border-radius:4px;}
+</style>
+</head>
+<body>
+<header>Meine Feeds</header>
+
+<div id="feedForm">
+  <input type="text" id="newFeed" placeholder="Neue Feed URL">
+  <button onclick="addFeed()">Hinzufügen</button>
+</div>
+
+<div id="feedList"></div>
+
+<script src="https://unpkg.com/rss-parser/dist/rss-parser.min.js"></script>
+<script>
+const parser = new RSSParser();
+let feedURLs = JSON.parse(localStorage.getItem('feedURLs') || '["https://www.reddit.com/r/aww/.rss","https://www.reddit.com/r/interestingasfuck/.rss"]');
+const blockKeywords = ["Politik","Krieg","Trump","AfD","Ukraine","Israel","Islam","Christ","Flüchtlinge","Tod","Drama"];
+
+async function loadFeeds() {
+  const container = document.getElementById('feedList');
+  container.innerHTML = '';
+  for (const url of feedURLs) {
+    try {
+      const feed = await parser.parseURL('https://api.allorigins.win/raw?url=' + encodeURIComponent(url));
+      feed.items.forEach(item => {
+        const combinedText = (item.title + (item.contentSnippet || ''));
+        if(!blockKeywords.some(k => combinedText.includes(k))) {
+          const div = document.createElement('div');
+          div.className = 'feed-item';
+          div.innerHTML = `<strong>${item.title}</strong><p>${item.contentSnippet || ''}</p>`;
+          
+          if(item.enclosure && item.enclosure.url.endsWith('.mp4')) {
+            const video = document.createElement('video');
+            video.src = item.enclosure.url;
+            video.controls = true;
+            video.autoplay = true;
+            video.muted = true;
+            div.appendChild(video);
+          }
+          
+          if(item.enclosure && (item.enclosure.url.endsWith('.jpg') || item.enclosure.url.endsWith('.png'))) {
+            const img = document.createElement('img');
+            img.src = item.enclosure.url;
+            div.appendChild(img);
+          }
+          
+          const btn = document.createElement('button');
+          btn.innerText = "Artikel öffnen";
+          btn.className = "openLink";
+          btn.onclick = () => window.open(item.link,'_blank');
+          div.appendChild(btn);
+          
+          container.appendChild(div);
+        }
+      });
+    } catch(e) {
+      console.log("Fehler beim Laden von "+url, e);
+    }
+  }
+}
+
+function addFeed() {
+  const input = document.getElementById('newFeed');
+  const url = input.value.trim();
+  if(url && !feedURLs.includes(url)) {
+    feedURLs.push(url);
+    localStorage.setItem('feedURLs', JSON.stringify(feedURLs));
+    input.value = '';
+    loadFeeds();
+  }
+}
+
+document.addEventListener('touchend', () => {
+  if(window.scrollY === 0) loadFeeds();
+});
+
+loadFeeds();
+</script>
+
+<script src="service-worker.js"></script>
+</body>
+</html>
