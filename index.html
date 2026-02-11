@@ -4,7 +4,6 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Meine Feeds</title>
-<link rel="manifest" href="manifest.json">
 <style>
 body { font-family: sans-serif; margin:0; padding:0; background:#f8f8f8;}
 header { padding:15px; background:#007AFF; color:white; text-align:center; font-size:1.2em;}
@@ -14,6 +13,7 @@ header { padding:15px; background:#007AFF; color:white; text-align:center; font-
 .feed-item { border-bottom:1px solid #ccc; padding:10px; background:white; margin-bottom:5px; border-radius:4px;}
 .feed-item img, .feed-item video { max-width:100%; margin-top:5px; border-radius:4px;}
 button.openLink { margin-top:5px; background:#007AFF; color:white; border:none; padding:5px 10px; cursor:pointer; border-radius:4px;}
+.error { color:red; font-size:0.9em; margin:10px 0; }
 </style>
 </head>
 <body>
@@ -26,59 +26,85 @@ button.openLink { margin-top:5px; background:#007AFF; color:white; border:none; 
 
 <div id="feedList"></div>
 
-<script src="https://unpkg.com/rss-parser/dist/rss-parser.min.js"></script>
 <script>
-const parser = new RSSParser();
-let feedURLs = JSON.parse(localStorage.getItem('feedURLs') || '["https://www.reddit.com/r/aww/.rss","https://www.reddit.com/r/interestingasfuck/.rss"]');
+let feedURLs = JSON.parse(localStorage.getItem('feedURLs') || '["https://www.reddit.com/r/aww/.rss"]');
 const blockKeywords = ["Politik","Krieg","Trump","AfD","Ukraine","Israel","Islam","Christ","Flüchtlinge","Tod","Drama"];
+
+async function fetchFeed(url) {
+  try {
+    // Reddit RSS über CORS-Proxy
+    const proxyUrl = 'https://api.allorigins.win/get?url=' + encodeURIComponent(url);
+    const response = await fetch(proxyUrl);
+    const data = await response.json();
+    const parser = new DOMParser();
+    const xml = parser.parseFromString(data.contents, "text/xml");
+    return xml;
+  } catch(e) {
+    console.log("Fehler beim Laden von " + url, e);
+    return null;
+  }
+}
+
+function parseRSS(xml) {
+  const items = [];
+  const entries = xml.querySelectorAll("entry, item");
+  entries.forEach(e => {
+    const title = e.querySelector("title") ? e.querySelector("title").textContent : "Kein Titel";
+    const link = e.querySelector("link") ? (e.querySelector("link").getAttribute("href") || e.querySelector("link").textContent) : "#";
+    const contentSnippet = e.querySelector("content, description") ? e.querySelector("content, description").textContent : "";
+    const enclosure = e.querySelector("enclosure") ? {url: e.querySelector("enclosure").getAttribute("url")} : null;
+    items.push({title, link, contentSnippet, enclosure});
+  });
+  return items;
+}
 
 async function loadFeeds() {
   const container = document.getElementById('feedList');
   container.innerHTML = '';
-  for (const url of feedURLs) {
-    try {
-      const feed = await parser.parseURL('https://api.allorigins.win/raw?url=' + encodeURIComponent(url));
-      feed.items.forEach(item => {
-        const combinedText = (item.title + (item.contentSnippet || ''));
-        if(!blockKeywords.some(k => combinedText.includes(k))) {
-          const div = document.createElement('div');
-          div.className = 'feed-item';
-          div.innerHTML = `<strong>${item.title}</strong><p>${item.contentSnippet || ''}</p>`;
-          
-          if(item.enclosure && item.enclosure.url.endsWith('.mp4')) {
-            const video = document.createElement('video');
-            video.src = item.enclosure.url;
-            video.controls = true;
-            video.autoplay = true;
-            video.muted = true;
-            div.appendChild(video);
-          }
-          
-          if(item.enclosure && (item.enclosure.url.endsWith('.jpg') || item.enclosure.url.endsWith('.png'))) {
-            const img = document.createElement('img');
-            img.src = item.enclosure.url;
-            div.appendChild(img);
-          }
-          
-          const btn = document.createElement('button');
-          btn.innerText = "Artikel öffnen";
-          btn.className = "openLink";
-          btn.onclick = () => window.open(item.link,'_blank');
-          div.appendChild(btn);
-          
-          container.appendChild(div);
-        }
-      });
-    } catch(e) {
-      console.log("Fehler beim Laden von "+url, e);
+  for(const url of feedURLs){
+    const xml = await fetchFeed(url);
+    if(!xml){
+      const errDiv = document.createElement('div');
+      errDiv.className = "error";
+      errDiv.innerText = "Fehler beim Laden des Feeds: " + url;
+      container.appendChild(errDiv);
+      continue;
     }
+    const items = parseRSS(xml);
+    items.forEach(item => {
+      const combinedText = item.title + item.contentSnippet;
+      if(!blockKeywords.some(k => combinedText.includes(k))){
+        const div = document.createElement('div');
+        div.className = "feed-item";
+        div.innerHTML = `<strong>${item.title}</strong><p>${item.contentSnippet}</p>`;
+        if(item.enclosure && (item.enclosure.url.endsWith('.jpg') || item.enclosure.url.endsWith('.png'))) {
+          const img = document.createElement('img');
+          img.src = item.enclosure.url;
+          div.appendChild(img);
+        }
+        if(item.enclosure && item.enclosure.url.endsWith('.mp4')) {
+          const video = document.createElement('video');
+          video.src = item.enclosure.url;
+          video.controls = true;
+          video.autoplay = true;
+          video.muted = true;
+          div.appendChild(video);
+        }
+        const btn = document.createElement('button');
+        btn.innerText = "Artikel öffnen";
+        btn.className = "openLink";
+        btn.onclick = () => window.open(item.link,'_blank');
+        div.appendChild(btn);
+        container.appendChild(div);
+      }
+    });
   }
 }
 
-function addFeed() {
+function addFeed(){
   const input = document.getElementById('newFeed');
   const url = input.value.trim();
-  if(url && !feedURLs.includes(url)) {
+  if(url && !feedURLs.includes(url)){
     feedURLs.push(url);
     localStorage.setItem('feedURLs', JSON.stringify(feedURLs));
     input.value = '';
@@ -86,13 +112,8 @@ function addFeed() {
   }
 }
 
-document.addEventListener('touchend', () => {
-  if(window.scrollY === 0) loadFeeds();
-});
-
+// Initiales Laden
 loadFeeds();
 </script>
-
-<script src="service-worker.js"></script>
 </body>
 </html>
